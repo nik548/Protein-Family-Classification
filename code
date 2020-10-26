@@ -57,3 +57,147 @@ test_sm = test.loc[test['family_accession'].isin(classes)].reset_index()
 print(len(train_sm))
 print(len(val_sm))
 print(len(test_sm))
+
+counts = train_sm.family_id.value_counts(sort='true').nlargest(30).plot.bar()
+print(counts)
+
+#plot counts
+counts_1 = train_sm.family_id.value_counts()
+plt.figure()
+sns.distplot(counts_1, hist = False, color = 'blue')
+plt.title('Count Distribution for Family Types')
+plt.ylabel('% of records')
+plt.show()
+
+counts = val_sm.family_id.value_counts(sort='true').nlargest(20).plot.bar()
+print(counts)
+
+#plot counts
+counts_1 = val_sm.family_id.value_counts()
+plt.figure()
+sns.distplot(counts_1, hist = False, color = 'blue')
+plt.title('Count Distribution for Family Types')
+plt.ylabel('% of records')
+plt.show()
+
+counts = test_sm.family_id.value_counts(sort='true').nlargest(20).plot.bar()
+print(counts)
+
+#plot counts
+counts_1 = test_sm.family_id.value_counts()
+plt.figure()
+sns.distplot(counts_1, hist = False, color = 'blue')
+plt.title('Count Distribution for Family Types')
+plt.ylabel('% of records')
+plt.show()
+
+train_s = train_sm.drop_duplicates(subset=["family_id","sequence"])
+val_s = val_sm.drop_duplicates(subset=["family_id","sequence"])
+test_s = train_sm.drop_duplicates(subset=["family_id","sequence"])
+
+
+from sklearn.utils import shuffle
+train_sf = shuffle(train_s, random_state = 19)
+val_sf = shuffle(val_s, random_state = 19)
+test_sf = shuffle(test_s, random_state = 19)
+
+# 3). ----- Train Test Split -----
+
+from keras.preprocessing import text, sequence
+from keras.preprocessing.text import Tokenizer
+
+# maximum length of sequence, everything afterwards is discarded
+max_length = 128
+train_seqs = train_sf.sequence.values
+val_seqs = val_sf.sequence.values
+test_seqs = test_sf.sequence.values
+
+#create and fit tokenizer
+tokenizer = Tokenizer(char_level=True)
+
+tokenizer.fit_on_texts(train_seqs)
+tokenizer.fit_on_texts(val_seqs)
+tokenizer.fit_on_texts(test_seqs)
+
+#represent input data as word rank number sequences
+X_train_1 = tokenizer.texts_to_sequences(train_seqs)
+X_val_1 = tokenizer.texts_to_sequences(val_seqs)
+X_test_1 = tokenizer.texts_to_sequences(test_seqs)
+
+
+X_train = sequence.pad_sequences(X_train_1, maxlen=max_length)
+X_val = sequence.pad_sequences(X_val_1, maxlen=max_length)
+X_test = sequence.pad_sequences(X_test_1, maxlen=max_length)
+
+from sklearn.preprocessing import LabelBinarizer
+
+# Transform labels to one-hot
+lb = LabelBinarizer()
+
+y_train = lb.fit_transform(train_sf.family_id)
+y_val = lb.fit_transform(val_sf.family_id)
+y_test = lb.fit_transform(test_sf.family_id)
+
+# 4). ------ Machine Learning Models ------
+
+import keras
+from keras.models import Sequential
+from keras.layers import Dense, Conv1D, MaxPooling1D, Flatten, BatchNormalization
+from keras.layers import LSTM, Dropout
+from keras.layers.embeddings import Embedding
+
+
+embedding_dim = 50
+
+# create the model
+model = Sequential()
+model.add(Embedding(len(tokenizer.word_index)+1, embedding_dim, input_length=max_length))
+model.add(Conv1D(filters=64, kernel_size=6, padding='same', activation='relu'))
+model.add(MaxPooling1D(pool_size=2))
+model.add(Conv1D(filters=128, kernel_size=3, padding='same', activation='relu'))
+model.add(MaxPooling1D(pool_size=2))
+model.add(Conv1D(filters=128, kernel_size=3, padding='same', activation='relu'))
+model.add(MaxPooling1D(pool_size=2))
+model.add(Conv1D(filters=128, kernel_size=3, padding='same', activation='relu'))
+model.add(MaxPooling1D(pool_size=2))
+model.add(Flatten())
+model.add(Dense(1024, activation='relu'))
+model.add(Dropout(0.5))
+model.add(BatchNormalization())
+model.add(Dense(512, activation='relu'))
+model.add(Dropout(0.5))
+model.add(BatchNormalization())
+model.add(Dense(750, activation='softmax'))
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+print(model.summary())
+
+
+es_callback = keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, verbose = 1)
+history = model.fit(X_train, y_train, validation_data=(X_val, y_val), callbacks = [es_callback], epochs = 50,  batch_size = 128)
+train_pred = model.predict(X_train)
+val_pred = model.predict(X_test)
+
+
+print(f1_score(np.argmax(y_train, axis=1), np.argmax(train_pred, axis=1), average = 'macro')*100)
+print(f1_score(np.argmax(y_val, axis=1), np.argmax(val_pred, axis=1), average = 'macro')*100)
+
+cm = sklearn.metrics.confusion_matrix(np.argmax(y_val, axis=1), np.argmax(val_pred, axis=1))
+cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+np.set_printoptions(precision=2)
+plt.figure(figsize=(10,10))
+plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title('Confusion matrix')
+plt.colorbar()
+tick_marks = np.arange(len(lb.classes_))
+plt.xticks(tick_marks, lb.classes_, rotation=90)
+plt.yticks(tick_marks, lb.classes_)
+#plt.ylabel('True label')
+#plt.xlabel('Predicted label')
+plt.show()
+
+print(classification_report(np.argmax(y_val, axis=1), np.argmax(val_pred, axis=1), target_names=lb.classes_))
+
+
+
+
+
